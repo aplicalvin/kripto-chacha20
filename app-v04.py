@@ -1,5 +1,3 @@
-import matplotlib
-matplotlib.use('TkAgg')  # PENTING: Set backend sebelum import pyplot
 import tkinter as tk
 from tkinter import filedialog, messagebox, scrolledtext, ttk
 import numpy as np
@@ -12,7 +10,7 @@ import matplotlib.pyplot as plt
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 
 # ==============================================================================
-# 1. LOGIKA METRIK (DIPERBAIKI)
+# 1. LOGIKA METRIK (TIDAK BERUBAH)
 # ==============================================================================
 
 def calculate_mse(img1, img2):
@@ -23,7 +21,7 @@ def calculate_rmse(img1, img2):
 
 def calculate_psnr(img1, img2):
     mse = calculate_mse(img1, img2)
-    if mse == 0: return 100.0
+    if mse == 0: return 100.0 
     max_pixel = 255.0
     return 20 * np.log10(max_pixel / np.sqrt(mse))
 
@@ -97,22 +95,16 @@ def calculate_avalanche_effect(img_original, key_str):
     return ae_score, key1.hex(), key2.hex()
 
 # ==============================================================================
-# 2. APLIKASI GUI (TKINTER)
+# 2. APLIKASI GUI (TKINTER) - REVISI SCROLLABLE
 # ==============================================================================
 
 class CryptoApp:
     def __init__(self, root):
         self.root = root
-        self.root.title("ChaCha20 Image Encryption (UI Enhanced)")
+        self.root.title("ChaCha20 Image Encryption (Scrollable UI)")
         self.root.geometry("1400x900")
         self.root.configure(bg="#f5f6fa")
-        
-        # Fullscreen / Zoomed state handling
-        import platform
-        if platform.system() == "Windows":
-            self.root.state("zoomed")
-        else:
-            self.root.attributes("-zoomed", True)
+        # self.root.state('zoomed') # Opsional: Fullscreen
 
         self.original_arr = None
         self.encrypted_arr = None
@@ -130,39 +122,40 @@ class CryptoApp:
         main_container = tk.Frame(self.root, bg="#f5f6fa")
         main_container.pack(fill=tk.BOTH, expand=True)
 
-        # Canvas untuk area scroll (disimpan ke self.main_canvas agar bisa diakses untuk auto-scroll)
-        self.main_canvas = tk.Canvas(main_container, bg="#f5f6fa")
-        self.main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        # Canvas untuk area scroll
+        my_canvas = tk.Canvas(main_container, bg="#f5f6fa")
+        my_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         # Scrollbar Vertikal
-        my_scrollbar = tk.Scrollbar(main_container, orient=tk.VERTICAL, command=self.main_canvas.yview)
+        my_scrollbar = tk.Scrollbar(main_container, orient=tk.VERTICAL, command=my_canvas.yview)
         my_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
         # Konfigurasi Canvas
-        self.main_canvas.configure(yscrollcommand=my_scrollbar.set)
-        self.main_canvas.bind('<Configure>', lambda e: self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all")))
+        my_canvas.configure(yscrollcommand=my_scrollbar.set)
+        my_canvas.bind('<Configure>', lambda e: my_canvas.configure(scrollregion=my_canvas.bbox("all")))
 
-        # Frame KONTEN (Semua widget masuk sini)
-        self.scrollable_content = tk.Frame(self.main_canvas, bg="#f5f6fa")
+        # Frame KONTEN (Semua widget akan masuk ke sini, bukan ke self.root)
+        self.scrollable_content = tk.Frame(my_canvas, bg="#f5f6fa")
 
         # Masukkan Frame Konten ke dalam Canvas Window
-        canvas_window = self.main_canvas.create_window((0, 0), window=self.scrollable_content, anchor="nw")
+        canvas_window = my_canvas.create_window((0, 0), window=self.scrollable_content, anchor="nw")
 
         # Trik agar Frame Konten melebar mengikuti lebar Canvas (Responsif width)
         def _configure_frame_width(event):
             canvas_width = event.width
-            self.main_canvas.itemconfig(canvas_window, width=canvas_width)
+            my_canvas.itemconfig(canvas_window, width=canvas_width)
 
-        self.main_canvas.bind('<Configure>', _configure_frame_width)
+        my_canvas.bind('<Configure>', _configure_frame_width)
 
         # Binding Mousewheel agar bisa scroll pakai mouse
         def _on_mousewheel(event):
-            self.main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+            my_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
         
-        self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
+        # Bind mousewheel ke canvas dan root
+        my_canvas.bind_all("<MouseWheel>", _on_mousewheel)
 
         # ---------------------------------------------------------
-        # 2. ISI WIDGET
+        # 2. ISI WIDGET (Parent diganti ke self.scrollable_content)
         # ---------------------------------------------------------
 
         # ================= HEADER =================
@@ -204,7 +197,7 @@ class CryptoApp:
 
         tk.Button(control_frame, text="↻ Reset", bg="#636e72", command=self.reset_app, **btn_style).pack(side=tk.RIGHT, padx=10)
 
-        # ================= MAIN FRAME (COLUMNS) =================
+        # ================= MAIN FRAME =================
         main_frame = tk.Frame(self.scrollable_content, bg="#f5f6fa")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
         main_frame.grid_columnconfigure((0, 1, 2), weight=1)
@@ -212,38 +205,18 @@ class CryptoApp:
         self.col_orig = self.create_column(main_frame, "ORIGINAL IMAGE", 0)
         self.col_enc = self.create_column(main_frame, "ENCRYPTED IMAGE", 1)
         self.col_dec = self.create_column(main_frame, "DECRYPTED IMAGE", 2)
-
-        # ================= AVALANCHE EFFECT SECTION (DI BAWAH) =================
-        # Ini adalah bagian baru sesuai request
-        ae_container = tk.Frame(self.scrollable_content, bg="white", bd=1, relief=tk.FLAT)
-        ae_container.pack(fill=tk.X, padx=12, pady=20)
-
-        # Header AE
-        tk.Label(
-            ae_container,
-            text="📉 Avalanche Effect (AE) Analysis Result",
-            font=("Segoe UI", 12, "bold"),
-            bg="#dfe6e9",
-            fg="#2d3436",
-            pady=8,
-            anchor="w",
-            padx=10
-        ).pack(fill=tk.X)
-
-        # Text Area untuk Output AE
-        self.ae_result_text = tk.Text(ae_container, height=10, font=("Consolas", 10), bg="#fdfdfd", state=tk.DISABLED, relief=tk.FLAT)
-        self.ae_result_text.pack(fill=tk.X, padx=10, pady=10)
-
-        # Padding bawah agar tidak terlalu mepet
-        tk.Label(self.scrollable_content, text="", bg="#f5f6fa", height=3).pack()
+        
+        # Tambahan padding bawah agar tidak mentok saat scroll paling bawah
+        tk.Label(self.scrollable_content, text="", bg="#f5f6fa", height=2).pack()
 
 
-    # ================== SCROLLABLE IMAGE HELPER ==================
+    # ================== SCROLLABLE IMAGE PREVIEW ==================
     def create_scrollable_image(self, parent):
+        # Fungsi ini untuk scroll gambar individual (preview gambar)
         container = tk.Frame(parent, bg="white")
         container.pack(fill=tk.BOTH, expand=False, pady=4)
 
-        canvas = tk.Canvas(container, bg="white", height=220)
+        canvas = tk.Canvas(container, bg="white", height=250)  # Height preview gambar
         canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
 
         scrollbar = tk.Scrollbar(container, orient="vertical", command=canvas.yview)
@@ -257,11 +230,11 @@ class CryptoApp:
 
         img_label = tk.Label(scroll_frame, bg="white")
         img_label.pack()
-
-        # Fix mousewheel conflict
+        
+        # Binding mousewheel khusus untuk area gambar ini jika pointer ada di atasnya
         def _on_img_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-            return "break"
+             canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+             return "break" # Mencegah scroll root ikut bergerak
 
         canvas.bind("<MouseWheel>", _on_img_mousewheel)
 
@@ -273,6 +246,7 @@ class CryptoApp:
         frame.grid(row=0, column=col_index, padx=8, sticky="nsew")
         parent.grid_columnconfigure(col_index, weight=1)
 
+        # Header label
         tk.Label(
             frame,
             text=title,
@@ -282,19 +256,23 @@ class CryptoApp:
             pady=8
         ).pack(fill=tk.X)
 
+        # Image scrollable area
         img_label, img_canvas = self.create_scrollable_image(frame)
 
-        hist_frame = tk.Frame(frame, bg="white", height=300)
+        # Histogram container
+        hist_frame = tk.Frame(frame, bg="white")
         hist_frame.pack(fill=tk.X, padx=6, pady=5)
-        hist_frame.pack_propagate(False)
 
-        metrics_box = scrolledtext.ScrolledText(frame, height=8, font=("Consolas", 9))
+        # Metrics box
+        metrics_box = scrolledtext.ScrolledText(frame, height=18, font=("Consolas", 9))
         metrics_box.pack(fill=tk.BOTH, expand=True, padx=6, pady=10)
 
         return {"img_lbl": img_label, "hist_frm": hist_frame, "txt": metrics_box}
 
-    # ================== LOGIC FUNGSI ==================
-
+    # ========================================================
+    # LOGIC FUNGSI (TIDAK BERUBAH)
+    # ========================================================
+ 
     def load_image(self):
         file_path = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.bmp")])
         if not file_path: return
@@ -311,12 +289,9 @@ class CryptoApp:
             info = f"Ukuran: {self.original_arr.shape}\nEntropy Original: {ent:.5f}\n(Max Entropy 8-bit = 8.0)"
             self.update_metrics(self.col_orig["txt"], info)
             
-            self.plot_histogram(self.original_arr, self.col_orig["hist_frm"], "Original")
+            self.plot_histogram(self.original_arr, self.col_orig["hist_frm"], "red")
             self.clear_column(self.col_enc)
             self.clear_column(self.col_dec)
-            
-            # Reset AE output
-            self.update_metrics(self.ae_result_text, "Belum ada analisis Avalanche Effect.")
 
         except Exception as e:
             messagebox.showerror("Error", str(e))
@@ -332,7 +307,7 @@ class CryptoApp:
         self.encrypted_arr = enc_arr
         
         self.display_image(Image.fromarray(enc_arr), self.col_enc["img_lbl"])
-        self.plot_histogram(enc_arr, self.col_enc["hist_frm"], "Encrypted")
+        self.plot_histogram(enc_arr, self.col_enc["hist_frm"], "blue")
         
         orig = self.original_arr
         enc = enc_arr
@@ -343,8 +318,8 @@ MSE         : {calculate_mse(orig, enc):.4f}
 PSNR        : {calculate_psnr(orig, enc):.4f}
 NPCR        : {calculate_npcr(orig, enc):.4f} %
 UACI        : {calculate_uaci(orig, enc):.4f} %
-SSIM        : {calculate_ssim_custom(orig, enc):.4f}
-MSIQ        : {calculate_msiq(orig, enc):.4f}
+SSIM        : {calculate_ssim_custom(orig, enc):.4f} (Abs)
+MSIQ (MS-SSIM): {calculate_msiq(orig, enc):.4f}
 """
         self.update_metrics(self.col_enc["txt"], metrics)
 
@@ -363,7 +338,7 @@ MSIQ        : {calculate_msiq(orig, enc):.4f}
         
         self.decrypted_arr = dec_arr
         self.display_image(Image.fromarray(dec_arr), self.col_dec["img_lbl"])
-        self.plot_histogram(dec_arr, self.col_dec["hist_frm"], "Decrypted")
+        self.plot_histogram(dec_arr, self.col_dec["hist_frm"], "green")
         
         metrics = f"""--- HASIL DEKRIPSI ---
 Entropy Dec : {calculate_entropy(dec_arr):.5f}
@@ -377,7 +352,6 @@ SSIM        : {calculate_ssim_custom(self.original_arr, dec_arr):.4f}
         self.update_metrics(self.col_dec["txt"], metrics)
 
     def check_avalanche(self):
-        """Fitur Khusus Revisi: Uji Sensitivitas Kunci (Output di Bawah)"""
         if self.original_arr is None:
             messagebox.showwarning("Info", "Upload gambar dulu")
             return
@@ -385,35 +359,28 @@ SSIM        : {calculate_ssim_custom(self.original_arr, dec_arr):.4f}
         key_input = self.key_entry.get()
         if not key_input: return
         
-        # Indikator loading di area AE
-        self.update_metrics(self.ae_result_text, "Sedang menghitung Avalanche Effect...\nMohon tunggu proses enkripsi ulang dengan kunci termodifikasi...")
+        self.update_metrics(self.col_enc["txt"], "Sedang menghitung Avalanche Effect...\nMohon tunggu...")
         self.root.update()
         
         ae_score, k1_hex, k2_hex = calculate_avalanche_effect(self.original_arr, key_input)
         
-        msg = f"""=== HASIL ANALISIS AVALANCHE EFFECT (AE) PADA KUNCI ===
+        msg = f"""
+=== AVALANCHE EFFECT (AE) KUNCI ===
 
-1. Key Asli (Hash/Bytes): 
-   {k1_hex[:50]}...
+1. Key Asli (Hash): 
+   {k1_hex[:10]}...
    
-2. Key Uji (Dimodifikasi 1 bit dari Key Asli): 
-   {k2_hex[:50]}...
+2. Key Uji (Beda 1 bit): 
+   {k2_hex[:10]}...
 
-3. Perbedaan Bit pada Ciphertext (Avalanche Effect):
-   >> {ae_score:.5f} % <<
+3. Hasil Perubahan Bit Ciphertext:
+   {ae_score:.4f} %
 
------------------------------------------------------------
-INTERPRETASI:
-- Target Ideal AE adalah mendekati 50%.
-- Jika kita mengubah kunci hanya 1 bit, gambar hasil enkripsi berubah sebanyak {ae_score:.2f}%.
-- Ini menunjukkan algoritma ChaCha20 sangat sensitif terhadap perubahan kunci.
+> Teori Ideal: ~50%
 """
-        # Tampilkan di area bawah
-        self.update_metrics(self.ae_result_text, msg)
-        
-        # AUTO SCROLL KE BAWAH agar user melihat hasilnya
-        self.root.update_idletasks()
-        self.main_canvas.yview_moveto(1.0) 
+        messagebox.showinfo("Hasil Avalanche Effect", msg)
+        current_text = self.col_enc["txt"].get("1.0", tk.END)
+        self.update_metrics(self.col_enc["txt"], current_text + "\n" + msg)
 
     def chacha20_encrypt_wrapper(self, img_arr, key_str):
         if len(key_str) < 32:
@@ -425,37 +392,32 @@ INTERPRETASI:
         enc = cipher.encrypt(img_arr.flatten().tobytes())
         return np.frombuffer(enc, dtype=np.uint8).reshape(img_arr.shape), nonce, key
 
+    # Helpers UI (Resize Image for Preview)
     def display_image(self, pil_img, label):
         w, h = pil_img.size
+        # Batasi lebar preview
+        tw = 350
+        # Hitung aspect ratio
         aspect = w/h
-        tw = 400 # Ukuran preview sedikit disesuaikan
         th = int(tw/aspect)
+        
         resized = pil_img.resize((tw, th), Image.Resampling.LANCZOS)
         tk_img = ImageTk.PhotoImage(resized)
         label.config(image=tk_img, text="")
         label.image = tk_img
 
-    def plot_histogram(self, img_arr, frame, title_suffix):
-        for widget in frame.winfo_children(): widget.destroy()
-        
-        fig = plt.Figure(figsize=(5, 3), dpi=90)
+    def plot_histogram(self, img_arr, frame, color):
+        for w in frame.winfo_children(): w.destroy()
+        fig = plt.Figure(figsize=(4, 2), dpi=100)
         ax = fig.add_subplot(111)
-        
         if len(img_arr.shape) == 3:
-            colors = ['red', 'green', 'blue']
-            labels = ['R', 'G', 'B']
-            for i, (color, label) in enumerate(zip(colors, labels)):
-                h, b = np.histogram(img_arr[:, :, i].flatten(), bins=256, range=(0, 256))
-                ax.plot(b[:-1], h, color=color, alpha=0.7, linewidth=1, label=label)
-            ax.legend(loc='upper right', fontsize=7)
+            for i, c in enumerate(['r','g','b']):
+                h, b = np.histogram(img_arr[:,:,i].flatten(), bins=256, range=(0,256))
+                ax.plot(b[:-1], h, color=c, alpha=0.7)
         else:
-            h, b = np.histogram(img_arr.flatten(), bins=256, range=(0, 256))
-            ax.plot(b[:-1], h, color='gray', linewidth=1)
-        
-        ax.set_title(f"Histogram - {title_suffix}", fontsize=9, fontweight='bold')
-        ax.grid(True, alpha=0.3)
-        fig.tight_layout()
-        
+            h, b = np.histogram(img_arr.flatten(), bins=256, range=(0,256))
+            ax.plot(b[:-1], h, color='gray')
+        ax.set_title("Histogram", fontsize=8)
         canvas = FigureCanvasTkAgg(fig, master=frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -474,12 +436,10 @@ INTERPRETASI:
     def reset_app(self):
         self.original_arr = None
         self.encrypted_arr = None
-        self.decrypted_arr = None
         self.clear_column(self.col_orig)
         self.clear_column(self.col_enc)
         self.clear_column(self.col_dec)
         self.key_entry.delete(0, tk.END)
-        self.update_metrics(self.ae_result_text, "")
 
 if __name__ == "__main__":
     root = tk.Tk()

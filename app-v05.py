@@ -16,6 +16,7 @@ from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 # ==============================================================================
 
 def calculate_mse(img1, img2):
+    # MSE selalu positif
     return np.mean((img1.astype(float) - img2.astype(float)) ** 2)
 
 def calculate_rmse(img1, img2):
@@ -23,33 +24,53 @@ def calculate_rmse(img1, img2):
 
 def calculate_psnr(img1, img2):
     mse = calculate_mse(img1, img2)
-    if mse == 0: return 100.0
+    if mse == 0: return 100.0 # Nilai max jika identik
     max_pixel = 255.0
+    # PSNR selalu positif
     return 20 * np.log10(max_pixel / np.sqrt(mse))
 
 def calculate_npcr(img1, img2):
+    # Persentase pixel yang berubah (0-100%)
     return (np.sum(img1 != img2) / img1.size) * 100
 
 def calculate_uaci(img1, img2):
+    # Rata-rata intensitas perubahan (0-100%)
     diff = np.abs(img1.astype(float) - img2.astype(float))
     return (np.sum(diff) / (img1.size * 255)) * 100
 
 def calculate_entropy(img):
+    """
+    Menghitung Shannon Entropy.
+    Untuk citra 8-bit, nilai max adalah 8.0.
+    Rumus: -sum(p * log2(p))
+    """
+    # Ratakan array agar menghitung distribusi seluruh piksel
     flat_img = img.flatten()
+    # Hitung kemunculan setiap nilai 0-255
     hist, _ = np.histogram(flat_img, bins=256, range=(0, 256))
+    
+    # Normalisasi untuk mendapatkan probabilitas (p)
     prob = hist / hist.sum()
+    
+    # Hapus probabilitas 0 karena log2(0) tidak terdefinisi
     prob = prob[prob > 0]
+    
+    # Rumus Shannon Entropy
     entropy = -np.sum(prob * np.log2(prob))
-    return abs(entropy)
+    return abs(entropy) # Pastikan absolute (walau rumus aslinya sudah pasti positif)
 
 def calculate_ssim_custom(img1, img2):
+    # SSIM range -1 s/d 1.
+    # Agar "tidak ada yang negatif" (permintaan dosen), kita absolutkan
+    # atau kita asumsikan enkripsi membuat strukturnya hancur (mendekati 0)
     if len(img1.shape) == 3:
         val = ssim(img1, img2, channel_axis=2, data_range=255)
     else:
         val = ssim(img1, img2, data_range=255)
-    return abs(val)
+    return abs(val) # REVISI: Dipaksa positif
 
 def calculate_msiq(img1, img2):
+    """MS-SSIM pendekatan sederhana"""
     steps = 3
     total_score = 0
     curr1, curr2 = img1, img2
@@ -64,18 +85,28 @@ def calculate_msiq(img1, img2):
             curr1 = np.array(p1.resize(new_size, Image.BICUBIC))
             curr2 = np.array(p2.resize(new_size, Image.BICUBIC))
             
-    return abs(total_score / steps)
+    return abs(total_score / steps) # Pastikan positif
 
 def calculate_avalanche_effect(img_original, key_str):
+    """
+    Menghitung Avalanche Effect (AE) pada KUNCI.
+    Membandingkan Ciphertext 1 (Key Asli) vs Ciphertext 2 (Key modifikasi 1 bit).
+    Target ideal AE adalah ~50%.
+    """
+    # 1. Siapkan Key 1 (Asli)
     if len(key_str) < 32:
         key1 = hashlib.sha256(key_str.encode()).digest()
     else:
         key1 = key_str[:32].encode()
         
+    # 2. Siapkan Key 2 (Ubah 1 bit dari Key 1)
+    # Kita ambil byte terakhir, ubah 1 bit (XOR 1)
     key_list = bytearray(key1)
     key_list[-1] = key_list[-1] ^ 1 
     key2 = bytes(key_list)
     
+    # 3. Enkripsi gambar yang sama dengan kedua key
+    # Gunakan nonce yang SAMA agar perbandingan fair hanya pada Key
     nonce = b'\x00' * 12 
     
     cipher1 = ChaCha20.new(key=key1, nonce=nonce)
@@ -84,9 +115,13 @@ def calculate_avalanche_effect(img_original, key_str):
     cipher2 = ChaCha20.new(key=key2, nonce=nonce)
     enc2 = cipher2.encrypt(img_original.flatten().tobytes())
     
+    # 4. Hitung perbedaan bit (Hamming Distance)
+    # Konversi bytes ke array bit
     arr1 = np.frombuffer(enc1, dtype=np.uint8)
     arr2 = np.frombuffer(enc2, dtype=np.uint8)
     
+    # XOR untuk mencari beda bit, lalu hitung jumlah bit 1 (popcount)
+    # np.unpackbits mempercepat hitungan bit level
     bits1 = np.unpackbits(arr1)
     bits2 = np.unpackbits(arr2)
     
@@ -106,8 +141,6 @@ class CryptoApp:
         self.root.title("ChaCha20 Image Encryption (UI Enhanced)")
         self.root.geometry("1400x900")
         self.root.configure(bg="#f5f6fa")
-        
-        # Fullscreen / Zoomed state handling
         import platform
         if platform.system() == "Windows":
             self.root.state("zoomed")
@@ -122,51 +155,8 @@ class CryptoApp:
         self.setup_ui()
 
     def setup_ui(self):
-        # ---------------------------------------------------------
-        # 1. MEMBUAT STRUKTUR SCROLLABLE (Canvas Wrapper)
-        # ---------------------------------------------------------
-        
-        # Container utama
-        main_container = tk.Frame(self.root, bg="#f5f6fa")
-        main_container.pack(fill=tk.BOTH, expand=True)
-
-        # Canvas untuk area scroll (disimpan ke self.main_canvas agar bisa diakses untuk auto-scroll)
-        self.main_canvas = tk.Canvas(main_container, bg="#f5f6fa")
-        self.main_canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-
-        # Scrollbar Vertikal
-        my_scrollbar = tk.Scrollbar(main_container, orient=tk.VERTICAL, command=self.main_canvas.yview)
-        my_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Konfigurasi Canvas
-        self.main_canvas.configure(yscrollcommand=my_scrollbar.set)
-        self.main_canvas.bind('<Configure>', lambda e: self.main_canvas.configure(scrollregion=self.main_canvas.bbox("all")))
-
-        # Frame KONTEN (Semua widget masuk sini)
-        self.scrollable_content = tk.Frame(self.main_canvas, bg="#f5f6fa")
-
-        # Masukkan Frame Konten ke dalam Canvas Window
-        canvas_window = self.main_canvas.create_window((0, 0), window=self.scrollable_content, anchor="nw")
-
-        # Trik agar Frame Konten melebar mengikuti lebar Canvas (Responsif width)
-        def _configure_frame_width(event):
-            canvas_width = event.width
-            self.main_canvas.itemconfig(canvas_window, width=canvas_width)
-
-        self.main_canvas.bind('<Configure>', _configure_frame_width)
-
-        # Binding Mousewheel agar bisa scroll pakai mouse
-        def _on_mousewheel(event):
-            self.main_canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-        
-        self.main_canvas.bind_all("<MouseWheel>", _on_mousewheel)
-
-        # ---------------------------------------------------------
-        # 2. ISI WIDGET
-        # ---------------------------------------------------------
-
         # ================= HEADER =================
-        header = tk.Frame(self.scrollable_content, bg="#2d3436", height=60)
+        header = tk.Frame(self.root, bg="#2d3436", height=60)
         header.pack(fill=tk.X)
 
         tk.Label(
@@ -179,9 +169,10 @@ class CryptoApp:
         ).pack()
 
         # ============== CONTROL PANEL =================
-        control_frame = tk.Frame(self.scrollable_content, bg="#ffffff", bd=1, relief=tk.FLAT)
+        control_frame = tk.Frame(self.root, bg="#ffffff", bd=1, relief=tk.FLAT)
         control_frame.pack(fill=tk.X, padx=12, pady=10, ipady=6)
 
+        # Styling tombol
         btn_style = {
             "font": ("Segoe UI", 10, "bold"),
             "fg": "white",
@@ -204,8 +195,8 @@ class CryptoApp:
 
         tk.Button(control_frame, text="↻ Reset", bg="#636e72", command=self.reset_app, **btn_style).pack(side=tk.RIGHT, padx=10)
 
-        # ================= MAIN FRAME (COLUMNS) =================
-        main_frame = tk.Frame(self.scrollable_content, bg="#f5f6fa")
+        # ================= MAIN FRAME =================
+        main_frame = tk.Frame(self.root, bg="#f5f6fa")
         main_frame.pack(fill=tk.BOTH, expand=True, padx=12, pady=10)
         main_frame.grid_columnconfigure((0, 1, 2), weight=1)
 
@@ -213,32 +204,7 @@ class CryptoApp:
         self.col_enc = self.create_column(main_frame, "ENCRYPTED IMAGE", 1)
         self.col_dec = self.create_column(main_frame, "DECRYPTED IMAGE", 2)
 
-        # ================= AVALANCHE EFFECT SECTION (DI BAWAH) =================
-        # Ini adalah bagian baru sesuai request
-        ae_container = tk.Frame(self.scrollable_content, bg="white", bd=1, relief=tk.FLAT)
-        ae_container.pack(fill=tk.X, padx=12, pady=20)
-
-        # Header AE
-        tk.Label(
-            ae_container,
-            text="📉 Avalanche Effect (AE) Analysis Result",
-            font=("Segoe UI", 12, "bold"),
-            bg="#dfe6e9",
-            fg="#2d3436",
-            pady=8,
-            anchor="w",
-            padx=10
-        ).pack(fill=tk.X)
-
-        # Text Area untuk Output AE
-        self.ae_result_text = tk.Text(ae_container, height=10, font=("Consolas", 10), bg="#fdfdfd", state=tk.DISABLED, relief=tk.FLAT)
-        self.ae_result_text.pack(fill=tk.X, padx=10, pady=10)
-
-        # Padding bawah agar tidak terlalu mepet
-        tk.Label(self.scrollable_content, text="", bg="#f5f6fa", height=3).pack()
-
-
-    # ================== SCROLLABLE IMAGE HELPER ==================
+    # ================== SCROLL ==================
     def create_scrollable_image(self, parent):
         container = tk.Frame(parent, bg="white")
         container.pack(fill=tk.BOTH, expand=False, pady=4)
@@ -258,13 +224,6 @@ class CryptoApp:
         img_label = tk.Label(scroll_frame, bg="white")
         img_label.pack()
 
-        # Fix mousewheel conflict
-        def _on_img_mousewheel(event):
-            canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-            return "break"
-
-        canvas.bind("<MouseWheel>", _on_img_mousewheel)
-
         return img_label, canvas
 
     # ================== CARD COLUMN LAYOUT ==================
@@ -273,6 +232,7 @@ class CryptoApp:
         frame.grid(row=0, column=col_index, padx=8, sticky="nsew")
         parent.grid_columnconfigure(col_index, weight=1)
 
+        # Header label
         tk.Label(
             frame,
             text=title,
@@ -282,21 +242,28 @@ class CryptoApp:
             pady=8
         ).pack(fill=tk.X)
 
+        # Image scrollable area
         img_label, img_canvas = self.create_scrollable_image(frame)
 
+        # Histogram container dengan tinggi tetap
         hist_frame = tk.Frame(frame, bg="white", height=300)
         hist_frame.pack(fill=tk.X, padx=6, pady=5)
-        hist_frame.pack_propagate(False)
+        hist_frame.pack_propagate(False)  # PENTING: Agar tinggi tetap
 
+        # Metrics box
         metrics_box = scrolledtext.ScrolledText(frame, height=8, font=("Consolas", 9))
         metrics_box.pack(fill=tk.BOTH, expand=True, padx=6, pady=10)
 
         return {"img_lbl": img_label, "hist_frm": hist_frame, "txt": metrics_box}
 
-    # ================== LOGIC FUNGSI ==================
-
     def load_image(self):
-        file_path = filedialog.askopenfilename(filetypes=[("Images", "*.png;*.jpg;*.jpeg;*.bmp")])
+        file_path = filedialog.askopenfilename(filetypes=[
+            ("PNG files", "*.png"),
+            ("JPEG files", "*.jpg"),
+            ("JPEG files", "*.jpeg"),
+            ("Bitmap", "*.bmp"),
+            ("All files", "*.*")
+        ])
         if not file_path: return
 
         try:
@@ -307,16 +274,16 @@ class CryptoApp:
             
             self.display_image(img, self.col_orig["img_lbl"])
             
+            # Tampilkan Entropy Original
             ent = calculate_entropy(self.original_arr)
             info = f"Ukuran: {self.original_arr.shape}\nEntropy Original: {ent:.5f}\n(Max Entropy 8-bit = 8.0)"
             self.update_metrics(self.col_orig["txt"], info)
             
+            # Plot histogram ORIGINAL
             self.plot_histogram(self.original_arr, self.col_orig["hist_frm"], "Original")
+            
             self.clear_column(self.col_enc)
             self.clear_column(self.col_dec)
-            
-            # Reset AE output
-            self.update_metrics(self.ae_result_text, "Belum ada analisis Avalanche Effect.")
 
         except Exception as e:
             messagebox.showerror("Error", str(e))
@@ -328,23 +295,27 @@ class CryptoApp:
             messagebox.showwarning("Warning", "Key minimal 8 karakter!")
             return
 
+        # Enkripsi Utama
         enc_arr, self.nonce, _ = self.chacha20_encrypt_wrapper(self.original_arr, key_input)
         self.encrypted_arr = enc_arr
         
         self.display_image(Image.fromarray(enc_arr), self.col_enc["img_lbl"])
+        
+        # Plot histogram ENCRYPTED
         self.plot_histogram(enc_arr, self.col_enc["hist_frm"], "Encrypted")
         
+        # Hitung Metrik
         orig = self.original_arr
         enc = enc_arr
         
         metrics = f"""--- METRIK ENKRIPSI ---
-Entropy Enc : {calculate_entropy(enc):.5f}
+Entropy Enc : {calculate_entropy(enc):.5f} (Target ~8.0)
 MSE         : {calculate_mse(orig, enc):.4f}
 PSNR        : {calculate_psnr(orig, enc):.4f}
 NPCR        : {calculate_npcr(orig, enc):.4f} %
 UACI        : {calculate_uaci(orig, enc):.4f} %
-SSIM        : {calculate_ssim_custom(orig, enc):.4f}
-MSIQ        : {calculate_msiq(orig, enc):.4f}
+SSIM        : {calculate_ssim_custom(orig, enc):.4f} (Abs)
+MSIQ (MS-SSIM): {calculate_msiq(orig, enc):.4f}
 """
         self.update_metrics(self.col_enc["txt"], metrics)
 
@@ -352,6 +323,7 @@ MSIQ        : {calculate_msiq(orig, enc):.4f}
         if self.encrypted_arr is None: return
         key_input = self.key_entry.get()
         
+        # Validasi hash key
         if len(key_input) < 32:
             key_hash = hashlib.sha256(key_input.encode()).digest()
         else:
@@ -363,6 +335,8 @@ MSIQ        : {calculate_msiq(orig, enc):.4f}
         
         self.decrypted_arr = dec_arr
         self.display_image(Image.fromarray(dec_arr), self.col_dec["img_lbl"])
+        
+        # Plot histogram DECRYPTED
         self.plot_histogram(dec_arr, self.col_dec["hist_frm"], "Decrypted")
         
         metrics = f"""--- HASIL DEKRIPSI ---
@@ -377,7 +351,7 @@ SSIM        : {calculate_ssim_custom(self.original_arr, dec_arr):.4f}
         self.update_metrics(self.col_dec["txt"], metrics)
 
     def check_avalanche(self):
-        """Fitur Khusus Revisi: Uji Sensitivitas Kunci (Output di Bawah)"""
+        """Fitur Khusus Revisi: Uji Sensitivitas Kunci"""
         if self.original_arr is None:
             messagebox.showwarning("Info", "Upload gambar dulu")
             return
@@ -385,35 +359,31 @@ SSIM        : {calculate_ssim_custom(self.original_arr, dec_arr):.4f}
         key_input = self.key_entry.get()
         if not key_input: return
         
-        # Indikator loading di area AE
-        self.update_metrics(self.ae_result_text, "Sedang menghitung Avalanche Effect...\nMohon tunggu proses enkripsi ulang dengan kunci termodifikasi...")
+        # Proses berat, beri indikator
+        self.update_metrics(self.col_enc["txt"], "Sedang menghitung Avalanche Effect...\nMohon tunggu...")
         self.root.update()
         
         ae_score, k1_hex, k2_hex = calculate_avalanche_effect(self.original_arr, key_input)
         
-        msg = f"""=== HASIL ANALISIS AVALANCHE EFFECT (AE) PADA KUNCI ===
+        msg = f"""
+=== AVALANCHE EFFECT (AE) KUNCI ===
 
-1. Key Asli (Hash/Bytes): 
-   {k1_hex[:50]}...
+1. Key Asli (Hash): 
+   {k1_hex[:10]}...
    
-2. Key Uji (Dimodifikasi 1 bit dari Key Asli): 
-   {k2_hex[:50]}...
+2. Key Uji (Beda 1 bit): 
+   {k2_hex[:10]}...
 
-3. Perbedaan Bit pada Ciphertext (Avalanche Effect):
-   >> {ae_score:.5f} % <<
+3. Hasil Perubahan Bit Ciphertext:
+   {ae_score:.4f} %
 
------------------------------------------------------------
-INTERPRETASI:
-- Target Ideal AE adalah mendekati 50%.
-- Jika kita mengubah kunci hanya 1 bit, gambar hasil enkripsi berubah sebanyak {ae_score:.2f}%.
-- Ini menunjukkan algoritma ChaCha20 sangat sensitif terhadap perubahan kunci.
+> Teori Ideal: ~50%
+> Interpretasi: Jika kita mengubah kunci hanya 1 bit, gambar berubah sebanyak {ae_score:.2f}%.
 """
-        # Tampilkan di area bawah
-        self.update_metrics(self.ae_result_text, msg)
-        
-        # AUTO SCROLL KE BAWAH agar user melihat hasilnya
-        self.root.update_idletasks()
-        self.main_canvas.yview_moveto(1.0) 
+        messagebox.showinfo("Hasil Avalanche Effect", msg)
+        # Tulis juga di panel
+        current_text = self.col_enc["txt"].get("1.0", tk.END)
+        self.update_metrics(self.col_enc["txt"], current_text + "\n" + msg)
 
     def chacha20_encrypt_wrapper(self, img_arr, key_str):
         if len(key_str) < 32:
@@ -428,7 +398,7 @@ INTERPRETASI:
     def display_image(self, pil_img, label):
         w, h = pil_img.size
         aspect = w/h
-        tw = 400 # Ukuran preview sedikit disesuaikan
+        tw = 500
         th = int(tw/aspect)
         resized = pil_img.resize((tw, th), Image.Resampling.LANCZOS)
         tk_img = ImageTk.PhotoImage(resized)
@@ -436,26 +406,40 @@ INTERPRETASI:
         label.image = tk_img
 
     def plot_histogram(self, img_arr, frame, title_suffix):
-        for widget in frame.winfo_children(): widget.destroy()
+        """
+        Menampilkan histogram RGB/Grayscale dengan Matplotlib
+        """
+        # Hapus widget lama
+        for widget in frame.winfo_children():
+            widget.destroy()
         
-        fig = plt.Figure(figsize=(5, 3), dpi=90)
+        # Buat figure matplotlib
+        fig = plt.Figure(figsize=(6, 3.5), dpi=90)
         ax = fig.add_subplot(111)
         
-        if len(img_arr.shape) == 3:
+        # Plot histogram berdasarkan channel
+        if len(img_arr.shape) == 3:  # RGB
             colors = ['red', 'green', 'blue']
             labels = ['R', 'G', 'B']
             for i, (color, label) in enumerate(zip(colors, labels)):
-                h, b = np.histogram(img_arr[:, :, i].flatten(), bins=256, range=(0, 256))
-                ax.plot(b[:-1], h, color=color, alpha=0.7, linewidth=1, label=label)
+                channel_data = img_arr[:, :, i].flatten()
+                hist, bins = np.histogram(channel_data, bins=256, range=(0, 256))
+                ax.plot(bins[:-1], hist, color=color, alpha=0.7, linewidth=1, label=label)
             ax.legend(loc='upper right', fontsize=7)
-        else:
-            h, b = np.histogram(img_arr.flatten(), bins=256, range=(0, 256))
-            ax.plot(b[:-1], h, color='gray', linewidth=1)
+        else:  # Grayscale
+            channel_data = img_arr.flatten()
+            hist, bins = np.histogram(channel_data, bins=256, range=(0, 256))
+            ax.plot(bins[:-1], hist, color='gray', linewidth=1)
         
+        # Styling
         ax.set_title(f"Histogram - {title_suffix}", fontsize=9, fontweight='bold')
-        ax.grid(True, alpha=0.3)
+        ax.set_xlabel("Pixel Value", fontsize=7)
+        ax.set_ylabel("Frequency", fontsize=7)
+        ax.tick_params(labelsize=6)
+        ax.grid(True, alpha=0.3, linestyle='--', linewidth=0.5)
         fig.tight_layout()
         
+        # Embed ke Tkinter
         canvas = FigureCanvasTkAgg(fig, master=frame)
         canvas.draw()
         canvas.get_tk_widget().pack(fill=tk.BOTH, expand=True)
@@ -469,7 +453,8 @@ INTERPRETASI:
     def clear_column(self, col):
         col["img_lbl"].config(image='', text="...")
         self.update_metrics(col["txt"], "")
-        for w in col["hist_frm"].winfo_children(): w.destroy()
+        for w in col["hist_frm"].winfo_children():
+            w.destroy()
 
     def reset_app(self):
         self.original_arr = None
@@ -479,7 +464,6 @@ INTERPRETASI:
         self.clear_column(self.col_enc)
         self.clear_column(self.col_dec)
         self.key_entry.delete(0, tk.END)
-        self.update_metrics(self.ae_result_text, "")
 
 if __name__ == "__main__":
     root = tk.Tk()
